@@ -34,6 +34,7 @@
   {nb, ';'}
   {nb, '_X_HOME='X_Home:xpos_f' _Y_HOME='Y_Home:ypos_f' _Z_HOME='Z_Home:zpos_f}
   {nb, ';'}
+  local string xx
 endp
 
 @inch_system
@@ -50,8 +51,8 @@ endp
   global string sCamfilepath sSubspath cWo cPb cPe cG84 cG84p cCycs cHomep cTCcodep cTCcodes fG84spin cDr cCb cCe cDrZp cDrZs sPartname
   global string cDrCys cDrPts cG84endl cPn cHoffset
   global string sProgramType sOperationType
-  global integer iCPM
-  global logical bTitlePrinted bG80 bCpmFlag
+  global integer iCPM igSpin
+  global logical bTitlePrinted bG80 bCpmFlag b832ASK
   global logical bStartFile bTlchg bSkipxyrapid bWorkoffsettc
   global logical bSubs bTlseperation bTcseperation bDateTimeOutput bStopM00difftool bToolPreselect bToolChangeAtEnd
   global logical bFromendprogram bFrombeginchangetool bFromendchangetool bFromendoffile bMultiplefixtures
@@ -135,6 +136,8 @@ endp
   nRapidfeed            = 650.       ;0.70: Set your value for Max Feed in G1 (Used with Non-Sync'd Rapid Moves)
   iArcmode              = 2          ;0.70: Sets Arc Output Mode (1=AbsIJK, 2=IncIJK, 3=R 360AbsIJK, 4=R 360IncIJK)
   iCPM                  = 645        ;Continuous-path mode [0(off), 64, 641-5]
+  b832ASK               = 1          ;Input for CYCLE832 
+
   ;--------- Work Offset ---------
   cWo                   = 'G'        ;0.70: Sets the Character(s) used for Work Offset (i.e. G, E, G54.1 P)
   iWorkOffsetmode       = 1          ;0.70: Sets the Mode used for Work Offset (0=OFF, 1=G54, 2=E1, 3=G54.1 P1)
@@ -487,7 +490,7 @@ endp
   call @settings
   if sHomestrbegin ne ''
     sHomestr = sHomestrbegin
-    call @usr_prep_home_axis
+    ; call @usr_prep_home_axis
   endif
 endp
 
@@ -517,7 +520,7 @@ endp
   endif
   if sHomestrend ne ''
     sHomestr = sHomestrend
-    call @usr_prep_home_axis
+    ; call @usr_prep_home_axis
   endif
   if change(iAbsincmode)
     {nb}
@@ -669,30 +672,36 @@ endp
 endp
 
 @usr_ct
-  ; Handle all aspects of Tool Change
-  if bMultiplefixtures eq True
-    bFrombeginchangetool = True
-    call @Multiple_Fixtures
+  if bTlchg then
+    ; Handle all aspects of Tool Change
+    if bMultiplefixtures eq True
+      bFrombeginchangetool = True
+      call @Multiple_Fixtures
+    endif
+    if !first_tool
+      iTcnumber = iTcnumber + 1
+    endif
+    bStartFile = false
+    if !first_tool
+      call @usr_ct_before_notfirsttool
+    endif
+    if first_tool
+      call @usr_ct_before_firsttool
+    endif
+    call @usr_ct_toolchange
   endif
-  if !first_tool
-    iTcnumber = iTcnumber + 1
-  endif
-  bStartFile = false
-  if !first_tool
-    call @usr_ct_before_notfirsttool
-  endif
-  if first_tool
-    call @usr_ct_before_firsttool
-  endif
-  call @usr_ct_toolchange
-  call @usr_ct_init_gmstates
-  call @usr_ct_after
-  if !bMultiplefixtures
-    bSkipxyrapid = true
-  endif
-  if bMultiplefixtures eq True
-    bFromendchangetool = True
-    call @Multiple_Fixtures
+  call @cycle832
+  if bTlchg then
+    call @usr_ct_init_gmstates
+    call @usr_ct_after
+    if !bMultiplefixtures
+      bSkipxyrapid = true
+    endif
+    if bMultiplefixtures eq True
+      bFromendchangetool = True
+      call @Multiple_Fixtures
+    endif
+    bTlchg = false
   endif
 endp
 
@@ -718,7 +727,7 @@ endp
     endif
     if sHomestrtc ne ''
       sHomestr = sHomestrtc
-      call @usr_prep_home_axis
+      ; call @usr_prep_home_axis
     endif
   endif
   if bTcseperation
@@ -767,11 +776,7 @@ endp
       {cCb,'Tool Desc:'tool_message,cCe}
     endif
   endif
-  if CYCLE832 then
-    if job_type ne 'drill' then
-      {nb, 'CYCLE832(_camtolerance,'sOperationType',1)'}
-    endif
-  endif
+  
   if bG500 then
     {nb,'G500'}
   endif
@@ -1045,6 +1050,29 @@ endp
 
 ;--------------------
 
+@cycle832
+  local string slPreset
+  if CYCLE832 then
+    if job_type ne 'drill' then
+      if b832ASK ne true then
+        {nb, 'CYCLE832(_camtolerance,'sOperationType',1)'}
+      else
+        local string jn
+        input 'CYCLE832  => [ 0: OFF ] [ 1: AS ] [ 2: TS - S OFF ] [ 3: TS - S ON ] | '+job_name slPreset
+        if slPreset eq '1' then
+          {nb, 'CYCLE832(_camtolerance,'sOperationType',1)'}
+        elseif slPreset eq '2' then
+          {nb, 'CYCLE832(_camtolerance,_TOP_SURFACE_SMOOTH_OFF+'+sOperationType+',1)'}
+        elseif slPreset eq '3' then
+          {nb, 'CYCLE832(_camtolerance,_TOP_SURFACE_SMOOTH_ON+'+sOperationType+',1)'}
+        endif
+      endif
+    endif
+  endif
+endp
+
+;--------------------
+
 @start_of_job
   ; Handle what happens at start of operation(job)
   ; If using Subs we do not make tool change in @start_of_job
@@ -1066,10 +1094,8 @@ endp
   if bSubs
     {nb, cCb,job_name,cCe}
   else
-    if bTlchg
-      call @usr_ct
-      bTlchg = false
-    else
+    call @usr_ct
+    if bTlchg eq false
       {nb, cCb,job_name,cCe}
       if iPworkoffset ne iWorkoffset
         {nb}
@@ -1366,7 +1392,7 @@ endp
   call @usr_spindle_mcode_output
   if sHomestrstpsame ne ''
     sHomestr = sHomestrstpsame
-    call @usr_prep_home_axis
+    ; call @usr_prep_home_axis
   endif
   call @usr_forcedstop
   sUsrmsg = sStopMessage
@@ -1400,7 +1426,7 @@ endp
   call @usr_spindle_mcode_output
   if sHomestrstpdiff ne ''
     sHomestr = sHomestrstpdiff
-    call @usr_prep_home_axis
+    ; call @usr_prep_home_axis
   endif
   call @usr_forcedstop
   sUsrmsg = sStopMessage
@@ -1615,9 +1641,7 @@ endp
   else
     iSpindleDir = 4
   endif
-  if change(spin)
-    call @usr_spindle_output
-  endif
+  call @usr_spindle_output
 endp
 
 @start_tool
@@ -1641,8 +1665,11 @@ endp
 
 @usr_spindle_output
   ; Handle output for spindle
-  if job_type ne 'drill' then
-    {nb,'S'spin:integer_def_f ' '}
+  igSpin = spin
+  if change(igSpin)
+    if job_type ne 'drill' then
+      {nb,'S'spin:integer_def_f ' '}
+    endif
   endif
 endp
 
@@ -1670,10 +1697,7 @@ endp
 
 @call_proc
   ; Handle call to subroutine
-  if bTlchg
-    call @usr_ct
-    bTlchg = false
-  endif
+  call @usr_ct
   {nb, 'M98 P'label}
   {[' ('message, ')']}
 endp
@@ -1711,75 +1735,6 @@ endp
 endp
 
 ;-------------------
-
-@usr_prep_home_axis
-  ; Handle parsing of homing string and preping of output for homing
-  ; local integer i line l mode p1 xMode
-  ; local string s s1 s2 l1 pstr
-  ; s = sHomestr                               ;Original String
-  ; s1 = s                                     ;Temp String
-  ; l = strlen(s1)                             ;Get string length of Temp String
-  ; s2 = substr(s1,1,1)                   ;*Check for 'x' in first character to flag separate iHomingmode for each line
-  ; if s2 eq 'x'
-  ;     xMode = 1
-  ;     s1 = substr(s1,2,l)                        ;Remove 'x' from Temp String
-  ;     l = strlen(s1)                             ;Get string length of Temp String
-  ; else
-  ;     xMode = 0
-  ; endif
-  ; if !xMode                                    ;*Pull out Homing mode (when not using xMode)
-  ;     p1 = instr(s1,':')                         ;Find the position of first ":"
-  ;     l1 = left(s1,p1-1)                         ;Pull out the left of first ":"
-  ;     mode = tonum(l1)                           ;Convert string into Integer for "Mode" variable
-  ;     s1 = substr(s1,p1+1,l)                     ;Remove Homing mode from Temp String
-  ;     l = strlen(s1)                             ;Get string length of Temp String
-  ;                                              ;*Pull out Preperation String
-  ;     p1 = instr(s1,':')                         ;Find the position of second ":"
-  ;     if p1 ne 0                                 ;Check if PrepStr is defined
-  ;         pstr = left(s1,p1-1)                   ;Pull out the left of second ":"
-  ;         s1 = substr(s1,p1+1,l)                 ;Remove PrepString from Temp String
-  ;         l = strlen(s1)                         ;Get string length of Temp String
-  ;     endif
-  ; endif                                         ;*Pull out homing lines and send to output procedure
-  ; i = 1
-  ; while i < 50
-  ;     i = i + 1
-  ;     if xMode                                     ;*Pull out Homing mode (when using xMode)
-  ;         p1 = instr(s1,':')                         ;Find the position of first ":"
-  ;         l1 = left(s1,p1-1)                         ;Pull out the left of first ":"
-  ;         mode = tonum(l1)                           ;Convert string into Integer for "Mode" variable
-  ;         s1 = substr(s1,p1+1,l)                     ;Remove Homing mode from Temp String
-  ;         l = strlen(s1)                             ;Get string length of Temp String
-  ;                                                  ;*Pull out Preperation String
-  ;         p1 = instr(s1,':')                         ;Find the position of second ":"
-  ;         if p1 ne 0                                 ;Check if PrepStr is defined
-  ;             pstr = left(s1,p1-1)                   ;Pull out the left of second ":"
-  ;             s1 = substr(s1,p1+1,l)                 ;Remove PrepString from Temp String
-  ;             l = strlen(s1)                         ;Get string length of Temp String
-  ;         endif
-  ;     endif
-  ;     p1 = instr(s1,';')                      ;Find the position of ";"
-  ;     if p1 ne 0
-  ;         line = line + 1                     ;Keep track of lines. Not Used!!
-  ;         l1 = left(s1,p1-1)                  ;Pull out the left of ";"
-  ;         iHomingmode = mode                  ;Send Homing Mode
-  ;         cHomep = pstr                       ;Send Preperation String
-  ;         sHomeline = l1                      ;Send Homing Line
-  ;         call @usr_home_axis
-  ;     else
-  ;         line = line + 1                     ;Keep track of lines. Not Used!!
-  ;         iHomingmode = mode                  ;Send Homing Mode
-  ;         cHomep = pstr                       ;Send Preperation String
-  ;         sHomeline = s1                      ;Send Homing Line
-  ;         call @usr_home_axis
-  ;         i = 50                              ;Force end of While-Loop
-  ;     endif
-  ;     if i ne 50
-  ;         s1 = substr(s1,p1+1,l)              ;Remove Homing mode from Temp String
-  ;         l = strlen(s1)                      ;Get string length of Temp String
-  ;     endif
-  ; endw
-endp
 
 @usr_home_axis
   ; Handle output for homing the X-axis
@@ -1909,5 +1864,4 @@ endp
 ;-------------------
 
 ; TODO :
-; modal positions
-; spindle speed alaki print mishe tekrari
+; Standard Cycles
