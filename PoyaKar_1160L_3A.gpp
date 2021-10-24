@@ -231,7 +231,7 @@ endp
   bSubs = false          ;True = Using sub routines, False = Not using sub routines
   ; ------ Tracing functions -----
   ; trace "all":5                                                         ; Mode 1 (standard)d)
-  trace "all":1                                                        ; Mode 2 (standard)
+  ; trace "all":1                                                        ; Mode 2 (standard)
   ; trace "@rapid_move, @move_4x, @move_5x":5                             ; Mode 3
   ; trace "@line, @arc, @line_4X, @line_5x, @compensation":5              ; Mode 4
   ; trace "@drill, @drill_point, @drill4x_pnt, @end_drill":5              ; Mode 5
